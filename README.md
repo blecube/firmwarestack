@@ -1,19 +1,15 @@
 ##BLE CUBE - Firmware Stack
-This is the repository for the Firmware Stack of this project.
+This is the repository for the Firmware Stack of this project. The build file is found in [firmwarestack/pca10040/s132/arm5_no_packs/](https://github.com/blecube/firmwarestack/tree/master/pca10040/s132/arm5_no_packs)
 
 ####nRF52832
-Some text maybe
+This firmware stack is written for use on Nordic Semiconductor's SoC [nRF52832](https://www.nordicsemi.com/eng/Products/Bluetooth-low-energy2/nRF52832)
 
 
 ####SoftDevice v2.0.0
-Some text maybe
+The SoftDevice in use for this project is [v2.0.0](http://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.s132.sds%2Fdita%2Fsoftdevices%2Fs130%2Fs130sds.html)
 
 ####Necessary Software
-A good place to start with development on nRF52-series is [Nordic Semiconductors own "Getting Started" guide.](https://devzone.nordicsemi.com/tutorials/2/)
-
-Keil µVision
-nRFGO Studio
-J-Link Segger
+A good place to start with development on nRF52-series is [Nordic Semiconductors own "Getting Started" guide.](https://devzone.nordicsemi.com/tutorials/2/) This web page will inform you of every software needed for this project. As well as help you flash your first example code
 
 
 

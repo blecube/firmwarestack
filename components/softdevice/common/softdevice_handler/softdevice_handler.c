@@ -23,6 +23,7 @@
 #include "nrf_log.h"
 #include "sdk_common.h"
 #include "nrf_drv_config.h"
+#include "SEGGER_RTT.h"
 #if CLOCK_ENABLED
 #include "nrf_drv_clock.h"
 #endif
@@ -250,9 +251,8 @@ uint32_t softdevice_handler_init(nrf_clock_lf_cfg_t	*           p_clock_lf_cfg,
                                  softdevice_evt_schedule_func_t evt_schedule_func)
 {
     uint32_t err_code;
-
     SD_HANDLER_LOG_INIT();
-
+    
     // Save configuration.
 #if defined (BLE_STACK_SUPPORT_REQD)
     // Check that buffer is not NULL.
@@ -290,7 +290,6 @@ uint32_t softdevice_handler_init(nrf_clock_lf_cfg_t	*           p_clock_lf_cfg,
     }
 
     m_softdevice_enabled = true;
-
     // Enable BLE event interrupt (interrupt priority has already been set by the stack).
 #ifdef SOFTDEVICE_PRESENT
     return sd_nvic_EnableIRQ((IRQn_Type)SOFTDEVICE_EVT_IRQ);

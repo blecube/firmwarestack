@@ -35,6 +35,8 @@
 #define CTS_PIN_NUMBER 15
 #define RTS_PIN_NUMBER 16
 #define HWFC           true
+    
+#define RUMBLEPIN   25
 
 
 // serialization APPLICATION board - temp. setup for running serialized MEMU tests
@@ -56,9 +58,9 @@
 #define SER_CONN_CHIP_RESET_PIN     26    // Pin used to reset connectivity chip
 
 // Low frequency clock source to be used by the SoftDevice
-#define NRF_CLOCK_LFCLKSRC      {.source        = NRF_CLOCK_LF_SRC_XTAL,            \
-                                 .rc_ctiv       = 0,                                \
-                                 .rc_temp_ctiv  = 0,                                \
-                                 .xtal_accuracy = NRF_CLOCK_LF_XTAL_ACCURACY_20_PPM}
+#define NRF_CLOCK_LFCLKSRC      {.source        = NRF_CLOCK_LF_SRC_RC,            \
+                                 .rc_ctiv       = 2,                                \
+                                 .rc_temp_ctiv  = 16,                                \
+                                 .xtal_accuracy = 0} //NRF_CLOCK_LF_XTAL_ACCURACY_20_PPM
 
 #endif // PCA10040_H

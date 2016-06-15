@@ -12,13 +12,12 @@
 
 /** @file
  *
- * @defgroup ble_sdk_uart_over_ble_main main.c
+ * @defgroup main.c
  * @{
- * @ingroup  ble_sdk_app_nus_eval
- * @brief    UART over BLE application main file.
+ * @brief    BLE-cube application main file.
  *
- * This file contains the source code for a sample application that uses the Nordic UART service.
- * This application uses the @ref srvlib_conn_params module.
+ * This file contains the source code for an application that uses the Nordic UART service and the Nordic timeslot API for muliactivity between peripheral and adverticer modes.
+ * This application uses Eddystone-URL. 
  */
 
 #include <stdint.h>
@@ -26,7 +25,6 @@
 #include "advertiser_beacon.h"
 #include "app_button.h"
 #include "app_timer.h"
-#include "app_uart.h"
 #include "app_util_platform.h"
 #include "ble_advdata.h"
 #include "ble_advertising.h"
@@ -47,12 +45,21 @@
 #include "shiftReg.h"
 
 
+#define ABT_DEBUG_PRINT
+
+#ifdef ABT_DEBUG_PRINT
+    #include "SEGGER_RTT.h"
+    #define DEBUG_PRINTF SEGGER_RTT_printf
+#else
+    #define DEBUG_PRINTF(...)
+#endif
+
 #define IS_SRVC_CHANGED_CHARACT_PRESENT 0                                           /**< Include the service_changed characteristic. If not enabled, the server's database cannot be changed for the lifetime of the device. */
 
 #define CENTRAL_LINK_COUNT              0                                           /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
 #define PERIPHERAL_LINK_COUNT           1                                           /**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
 
-#define DEVICE_NAME                     "BLE Cube"                               /**< Name of device. Will be included in the advertising data. */
+#define DEVICE_NAME                     "BLE-Cube"                               /**< Name of device. Will be included in the advertising data. */
 #define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
 
 #define APP_ADV_INTERVAL                64  //(MSEC_TO_UNITS(100, UNIT_0_625_MS))                                        /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
@@ -78,12 +85,8 @@
 #define UART_RX_BUF_SIZE                256                                         /**< UART RX buffer size. */
 
 /*  Constants for the SAADC     */
-#define SAMPLES_IN_BUFFER               5       
-#define ADC_REF_VOLTAGE_IN_MILLIVOLTS   600                                          /**< Reference voltage (in milli volts) used by ADC while doing conversion. */
-#define ADC_PRE_SCALING_COMPENSATION    6                                            /**< The ADC is configured to use VDD with 1/3 prescaling as input. And hence the result of conversion is to be multiplied by 3 to get the actual value of the battery voltage.*/
-#define DIODE_FWD_VOLT_DROP_MILLIVOLTS  270
-#define ADC_RES_10BIT                   1024   
-#define ADC_COMPARE_RATE                100     //Compare ADC event every N milisec
+#define SAMPLES_IN_BUFFER               3       
+#define ADC_COMPARE_RATE                200     //Compare ADC event every N milisec
 
 // Eddystone non-connectable variables
 #define APP_CFG_NON_CONN_ADV_TIMEOUT    0                                           /**< Time for which the device must be advertising in non-connectable mode (in seconds). 0 disables the time-out. */
@@ -102,7 +105,8 @@
                                         0x52
 
 ////////////////////////// Static time variables for the ADC
-static const nrf_drv_timer_t   m_timer = NRF_DRV_TIMER_INSTANCE(0);
+static const nrf_drv_timer_t   m_timer = NRF_DRV_TIMER_INSTANCE(1);
+
 static nrf_ppi_channel_t       m_ppi_channel;
 //////////////////////////
 
@@ -115,16 +119,15 @@ static nrf_saadc_value_t                m_buffer_pool[2][SAMPLES_IN_BUFFER];
 static uint8_t                          cube_shaking = 0;
 
 /* Eddystone stasj */
-static ble_gap_adv_params_t m_adv_params;                                 //< Parameters to be passed to the stack when starting advertising. 
-
 static uint8_t eddystone_url_data[] =   //< Information advertised by the Eddystone URL frame type. 
 {
     //APP_EDDYSTONE_URL_FRAME_TYPE,   // Eddystone URL frame type.
-    //APP_EDDYSTONE_RSSI,             // RSSI value at 0 m.
+    //APP_EDDYSTONE_RSSI,             // RSSI value at 0 m. 
     APP_EDDYSTONE_URL_SCHEME,       // Scheme or prefix for URL ("http", "http://www", etc.)
     APP_EDDYSTONE_URL_URL           // URL with a maximum length of 17 bytes. Last byte is suffix (".com", ".org", etc.)
 };
-static bool                         EDDYSTONE = false;
+
+static uint8_t movement_counter;
 /////////////////////////
 
 
@@ -144,7 +147,8 @@ uint8_t solution[8]     =   {0, 0, 0, 0, 0, 0, 0, 0};
     solution[7] 
         0 = NULL
         1 = Feil løsning
-        3 = Rett løsning
+        2 = Rett løsning
+        3 = Initiate Lightshow
 */
 
 
@@ -156,7 +160,17 @@ uint8_t btn4_counter = 0;
 uint8_t btn5_counter = 0;
 uint8_t btn6_counter = 0; 
 
+//Declare the available colors
+uint8_t ledMatriseA[] = {whiteA, redA, greenA, redA+greenA, blueA+greenA, blueA+redA, blueA};
+uint8_t ledMatriseB[] = {whiteB, redB, greenB, redB+greenB, blueB+greenB, blueB+redB, blueB}; 
+
 bool knappSjekk = true;
+bool knappSjekk1 = true;
+bool knappSjekk2 = true;
+bool knappSjekk3 = true;
+bool knappSjekk4 = true;
+bool knappSjekk5 = true;
+bool knappSjekk6 = true;
 
 /**@brief Function for assert macro callback.
  *
@@ -215,37 +229,41 @@ static void gap_params_init(void)
  * @param[in] length   Length of the data.
  */
 /**@snippet [Handling the data received over BLE] */
-static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t length)
+static void  nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t length)
 {
-    printf("UART: %d", *p_data);
+    
     for (uint32_t i = 0; i < 8; i++)
     {
-        while(app_uart_put(p_data[i]) != NRF_SUCCESS);
         dataReceived[i] = p_data[i];
         
-        //Netsiden har gidd en ny oppgave, svaret var rett, og knapper resettes
-		if (dataReceived[7] == 0x02) { //0x03 betyr at løsning er sjekket, og løsningen var rett. 
+        //Netsiden har gitt en ny oppgave, svaret var rett, og knapper resettes
+		if (dataReceived[7] == 0x02) { //0x02 betyr at løsning er sjekket, og løsningen var rett. 
 			btn1_counter = btn2_counter = btn3_counter = btn4_counter = btn5_counter = btn6_counter = 0;
-            solution[7] = 0;
+            btn1_counter = solution[0] = dataReceived[0];
+            solution[7] = 3;
             solution[6] = 0;
             cube_shaking = 0;
 		}
-        else if (dataReceived[7] == 0x01){//0x03 betyr at løsning er sjekket, og løsningen var feil. 
+        else if (dataReceived[7] == 0x01){//0x01 betyr at løsning er sjekket, og løsningen var feil. 
+            nrf_gpio_pin_set(RUMBLEPIN);
+            nrf_delay_ms(100);
+            nrf_gpio_pin_clear(RUMBLEPIN);
             solution[7] = 0;
             solution[6] = 0;
             cube_shaking = 0;
         }
+        else if (dataReceived[7] == 0x03){//0x03 Betyr at vi vil se et lysshow!.
+            solution[7] = 3;
+            cube_shaking = 0;         
+        }
         //Man har motatt data for nytt mønster fra webside, 
 		if (dataReceived[6] == 0x01) {
-			btn1_counter = dataReceived[0];
+            btn1_counter = btn2_counter = btn3_counter = btn4_counter = btn5_counter = btn6_counter = 0;
+			btn1_counter = solution[0] = dataReceived[0];
+            solution[7] = 0;
             solution[6] = 0;
-			solution[0] = dataReceived[0];
 		}
-		/* SENDING AV DATA
-		ble_nus_string_send(&m_nus, string2send, sizeof(string2send));
-		*/
     }
-    while(app_uart_put('\n') != NRF_SUCCESS);
 }
 /**@snippet [Handling the data received over BLE] */
 
@@ -258,7 +276,7 @@ static void services_init(void)
     
     memset(&nus_init, 0, sizeof(nus_init));
 
-    nus_init.data_handler = nus_data_handler;
+   nus_init.data_handler = nus_data_handler;
     
     err_code = ble_nus_init(&m_nus, &nus_init);
     APP_ERROR_CHECK(err_code);
@@ -321,6 +339,7 @@ static void conn_params_init(void)
  *
  * @note This function will not return.
  */
+//This function is not used. 
 static void sleep_mode_enter(void)
 {
     uint32_t err_code = bsp_indication_set(BSP_INDICATE_IDLE);
@@ -358,7 +377,6 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
             break;
     }
 }
-
 
 /**@brief Function for the application's SoftDevice event handler.
  *
@@ -428,7 +446,6 @@ static void sys_evt_dispatch(uint32_t evt_id)
     app_beacon_on_sys_evt(evt_id);
 }
 
-
 /**@brief Function for the SoftDevice initialization.
  *
  * @details This function initializes the SoftDevice and the BLE event interrupt.
@@ -436,9 +453,13 @@ static void sys_evt_dispatch(uint32_t evt_id)
 static void ble_stack_init(void)
 {
     uint32_t err_code;
-    nrf_clock_lf_cfg_t clock_lf_cfg = NRF_CLOCK_LFCLKSRC; //var ikke i alfaversionen?   
+    SEGGER_RTT_printf(0, "  Setting clck\r\n");
+    nrf_clock_lf_cfg_t clock_lf_cfg = NRF_CLOCK_LFCLKSRC;
+    SEGGER_RTT_printf(0, "  clck set\r\n");
     // Initialize SoftDevice.
+    SEGGER_RTT_printf(0, "  SOFTDEVICE_HANDLER_INIT\r\n");
     SOFTDEVICE_HANDLER_INIT(&clock_lf_cfg, NULL);
+    SEGGER_RTT_printf(0, "  INITIALIZED\r\n");
     
     ble_enable_params_t ble_enable_params;
     err_code = softdevice_enable_get_default_config(CENTRAL_LINK_COUNT,
@@ -453,11 +474,9 @@ static void ble_stack_init(void)
     APP_ERROR_CHECK(err_code);
     
     // Subscribe for BLE events.
-    if(!EDDYSTONE){
-        err_code = softdevice_ble_evt_handler_set(ble_evt_dispatch);
-        APP_ERROR_CHECK(err_code);
-    }
-    //Sørg for at softdevice_sys_evt_handler_set(sys_evt_dispatch) blir kallt i ble_stack_init()
+    err_code = softdevice_ble_evt_handler_set(ble_evt_dispatch);
+    APP_ERROR_CHECK(err_code);
+
     err_code = softdevice_sys_evt_handler_set(sys_evt_dispatch);
     APP_ERROR_CHECK(err_code);
 }
@@ -495,81 +514,6 @@ void bsp_event_handler(bsp_event_t event)
             break;
     }
 }
-
-
-/**@brief   Function for handling app_uart events.
- *
- * @details This function will receive a single character from the app_uart module and append it to 
- *          a string. The string will be be sent over BLE when the last character received was a 
- *          'new line' i.e '\n' (hex 0x0D) or if the string has reached a length of 
- *          @ref NUS_MAX_DATA_LENGTH.
- */
-/**@snippet [Handling the data received over UART] */
-void uart_event_handle(app_uart_evt_t * p_event)
-{
-    static uint8_t data_array[BLE_NUS_MAX_DATA_LEN];
-    static uint8_t index = 0;
-    uint32_t       err_code;
-
-    switch (p_event->evt_type)
-    {
-        case APP_UART_DATA_READY:
-            UNUSED_VARIABLE(app_uart_get(&data_array[index]));
-            index++;
-
-            if ((data_array[index - 1] == '\n') || (index >= (BLE_NUS_MAX_DATA_LEN)))
-            {
-                err_code = ble_nus_string_send(&m_nus, data_array, index);
-                if (err_code != NRF_ERROR_INVALID_STATE)
-                {
-                    APP_ERROR_CHECK(err_code);
-                }
-                
-                index = 0;
-            }
-            break;
-
-        case APP_UART_COMMUNICATION_ERROR:
-            APP_ERROR_HANDLER(p_event->data.error_communication);
-            break;
-
-        case APP_UART_FIFO_ERROR:
-            APP_ERROR_HANDLER(p_event->data.error_code);
-            break;
-
-        default:
-            break;
-    }
-}
-/**@snippet [Handling the data received over UART] */
-
-
-/**@brief  Function for initializing the UART module.
- */
-/**@snippet [UART Initialization] */
-static void uart_init(void)
-{
-    uint32_t                     err_code;
-    const app_uart_comm_params_t comm_params =
-    {
-        RX_PIN_NUMBER,
-        TX_PIN_NUMBER,
-        RTS_PIN_NUMBER,
-        CTS_PIN_NUMBER,
-        APP_UART_FLOW_CONTROL_ENABLED,
-        false,
-        UART_BAUDRATE_BAUDRATE_Baud115200
-    };
-
-    APP_UART_FIFO_INIT( &comm_params,
-                       UART_RX_BUF_SIZE,
-                       UART_TX_BUF_SIZE,
-                       uart_event_handle,
-                       APP_IRQ_PRIORITY_LOW,
-                       err_code);
-    APP_ERROR_CHECK(err_code);
-}
-/**@snippet [UART Initialization] */
 
 
 /**@brief Function for initializing the Advertising functionality.
@@ -620,6 +564,7 @@ static void buttons_leds_init(bool * p_erase_bonds)
 
 /**@brief Function for placing the application in low power state while waiting for events.
  */
+//Need to make the program fully eventbased before adding this. 
 /*static void power_manage(void)
 {
     uint32_t err_code = sd_app_evt_wait();
@@ -630,25 +575,77 @@ static void buttons_leds_init(bool * p_erase_bonds)
 /////////////////////////////////////////////////////////////////////////
 /**             Funktions for SAADC and timer                          */
 /////////////////////////////////////////////////////////////////////////
-void timer_handler(nrf_timer_event_t event_type, void* p_context){
-
+void timer_light_show_handler(nrf_timer_event_t event_type, void* p_context){
+    switch(event_type)
+    {
+        case NRF_TIMER_EVENT_COMPARE1:
+            NRF_TIMER1->EVENTS_COMPARE[1] = 0;
+            NRF_TIMER1->TASKS_CLEAR = 1;
+            static int i;
+            i++;   
+            SEGGER_RTT_printf(0, "Time Event! nr: %d\r\n",i);
+            if(solution[7] == 0x03){
+                if(i > 44){
+                    i = 0;
+                }
+                else if(i > 34){
+                    if(btn1_counter == 3){
+                        btn1_counter = btn2_counter = btn3_counter = btn4_counter = btn5_counter = btn6_counter = 1;
+                    }
+                    else{
+                        btn1_counter = btn2_counter = btn3_counter = btn4_counter = btn5_counter = btn6_counter = 3;
+                    }
+                    shiftRegWrite(ledMatriseA[btn1_counter]+ledMatriseB[btn2_counter], ledMatriseA[btn3_counter]+ledMatriseB[btn4_counter], ledMatriseA[btn5_counter]+ledMatriseB[btn6_counter]);
+                }
+                else if(i > 24){
+                    if(btn1_counter == 0){
+                        btn1_counter = btn2_counter = btn3_counter = btn4_counter = btn5_counter = btn6_counter = 4;
+                    }
+                    else{
+                        btn1_counter = btn2_counter = btn3_counter = btn4_counter = btn5_counter = btn6_counter = 0;
+                    }
+                    shiftRegWrite(ledMatriseA[btn1_counter]+ledMatriseB[btn2_counter], ledMatriseA[btn3_counter]+ledMatriseB[btn4_counter], ledMatriseA[btn5_counter]+ledMatriseB[btn6_counter]);
+                }
+                else if(i & 1){
+                    if(btn1_counter == btnCounter(btn1, btn6_counter)){
+                        btn1_counter = btnCounter(btn1, btn1_counter);
+                    }
+                    else{
+                        btn1_counter = btnCounter(btn1, btn6_counter);
+                    }
+                    btn2_counter = btnCounter(btn1, btn1_counter);
+                    btn3_counter = btnCounter(btn1, btn2_counter);
+                    btn4_counter = btnCounter(btn1, btn3_counter);
+                    btn5_counter = btnCounter(btn1, btn4_counter);
+                    btn6_counter = btnCounter(btn1, btn5_counter);
+                    shiftRegWrite(ledMatriseA[btn1_counter]+ledMatriseB[btn2_counter], ledMatriseA[btn3_counter]+ledMatriseB[btn4_counter], ledMatriseA[btn5_counter]+ledMatriseB[btn6_counter]);
+                }
+            }       
+            break;
+        
+        default:
+            //Do nothing.
+            break;
+    } 
 }
 
-void saadc_sampling_event_init(void){
-    ret_code_t err_code;
+void saadc_sampling_event_init(void)
+{
+    ret_code_t err_code;  
     err_code = nrf_drv_ppi_init();
     APP_ERROR_CHECK(err_code);
-
-    err_code = nrf_drv_timer_init(&m_timer, NULL, timer_handler);
+ 
+    err_code = nrf_drv_timer_init(&m_timer, NULL, timer_light_show_handler);
     APP_ERROR_CHECK(err_code);
 
     /* setup m_timer for compare event every 100ms */
     uint32_t ticks = nrf_drv_timer_ms_to_ticks(&m_timer, ADC_COMPARE_RATE);
-    nrf_drv_timer_extended_compare(&m_timer, NRF_TIMER_CC_CHANNEL0, ticks, NRF_TIMER_SHORT_COMPARE0_CLEAR_MASK, false);
+    
+    nrf_drv_timer_extended_compare(&m_timer, NRF_TIMER_CC_CHANNEL1, ticks, NRF_TIMER_SHORT_COMPARE1_CLEAR_MASK, true);
     nrf_drv_timer_enable(&m_timer);
 
-    uint32_t timer_compare_event_addr = nrf_drv_timer_compare_event_address_get(&m_timer, NRF_TIMER_CC_CHANNEL0);
-    uint32_t saadc_sample_event_addr = nrf_drv_saadc_sample_task_get();
+    uint32_t timer_compare_event_addr = nrf_drv_timer_compare_event_address_get(&m_timer, NRF_TIMER_CC_CHANNEL1);
+    uint32_t saadc_sample_event_addr = nrf_drv_saadc_sample_task_get(); //NRF_SAADC_TASK_SAMPLE som argument?
 
     /* setup ppi channel so that timer compare event is triggering sample task in SAADC */
     err_code = nrf_drv_ppi_channel_alloc(&m_ppi_channel);
@@ -657,7 +654,10 @@ void saadc_sampling_event_init(void){
     err_code = nrf_drv_ppi_channel_assign(m_ppi_channel, timer_compare_event_addr, saadc_sample_event_addr);
     APP_ERROR_CHECK(err_code);
 }
-void saadc_sampling_event_enable(void){
+/**@brief Will Enable ADC sampling event
+*/
+void saadc_sampling_event_enable(void)
+{
     ret_code_t err_code = nrf_drv_ppi_channel_enable(m_ppi_channel);
     APP_ERROR_CHECK(err_code);
 }
@@ -665,41 +665,35 @@ void saadc_sampling_event_enable(void){
 */
 void saadc_event_handler(nrf_drv_saadc_evt_t const * p_event){
     if (p_event->type == NRF_DRV_SAADC_EVT_DONE){
-        static nrf_saadc_value_t  adc_result;
         static nrf_saadc_value_t  adc_result_last;
-        static uint8_t movement_counter;
-        //uint16_t adc_in_milli_volts;
-        uint32_t err_code;
+        int adc_xyz_result = 0;
 
+        uint32_t err_code;
         int i;
         for (i = 0; i < SAMPLES_IN_BUFFER; i++)
         {
-            adc_result = p_event->data.done.p_buffer[i];
-            if(adc_result_last == 0){
-                adc_result_last = adc_result;
-            }
-            if((adc_result > adc_result_last+20)||(adc_result < adc_result_last-20)){
-                movement_counter++;
-            }
-            else{
-                if(movement_counter != 0){
-                    movement_counter--;
-                }
-            }
+            adc_xyz_result += p_event->data.done.p_buffer[i];            
+        }
+        if(adc_result_last == 0){
+            adc_result_last = adc_xyz_result;
+        }
+        if((adc_xyz_result > adc_result_last+30)||(adc_xyz_result < adc_result_last-30)){
+            movement_counter+=1;
             if(movement_counter>3){
                 cube_shaking = 1;
+                SEGGER_RTT_printf(0, "    Ristes \r\n");
                 movement_counter = 0;
             }
-                
-            adc_result_last = adc_result;
         }
-        
-        
+        else{
+            if(movement_counter != 0){
+                movement_counter--;
+            }
+        }
+        SEGGER_RTT_printf(0, "Time Event!%d\r\n",adc_xyz_result);
+        adc_result_last = adc_xyz_result;
         err_code = nrf_drv_saadc_buffer_convert(p_event->data.done.p_buffer, SAMPLES_IN_BUFFER);
         APP_ERROR_CHECK(err_code);
-        
-        /*adc_in_milli_volts = ADC_RESULT_IN_MILLI_VOLTS(adc_result) +
-                                  DIODE_FWD_VOLT_DROP_MILLIVOLTS;*/
 
 
         if (
@@ -719,13 +713,37 @@ void saadc_event_handler(nrf_drv_saadc_evt_t const * p_event){
 
 void saadc_init(void){
     ret_code_t err_code;
-    nrf_saadc_channel_config_t channel_config =
+    
+    //Setup SAADC channel(s)
+    nrf_saadc_channel_config_t channel_x_config =
             NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(NRF_SAADC_INPUT_AIN6);
+    channel_x_config.acq_time = NRF_SAADC_ACQTIME_10US;
+    channel_x_config.gain = NRF_SAADC_GAIN1_4;
+    channel_x_config.reference = NRF_SAADC_REFERENCE_VDD4;
+    
+    nrf_saadc_channel_config_t channel_y_config =
+            NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(NRF_SAADC_INPUT_AIN5);
+    channel_y_config.acq_time = NRF_SAADC_ACQTIME_10US;
+    channel_y_config.gain = NRF_SAADC_GAIN1_4;
+    channel_y_config.reference = NRF_SAADC_REFERENCE_VDD4;
+    
+    nrf_saadc_channel_config_t channel_z_config =
+            NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(NRF_SAADC_INPUT_AIN4);
+    channel_z_config.acq_time = NRF_SAADC_ACQTIME_10US;
+    channel_z_config.gain = NRF_SAADC_GAIN1_4;
+    channel_z_config.reference = NRF_SAADC_REFERENCE_VDD4;
+    
     err_code = nrf_drv_saadc_init(NULL, saadc_event_handler);
     APP_ERROR_CHECK(err_code);
 
-    err_code = nrf_drv_saadc_channel_init(0, &channel_config);
+    //Initialize SAADC channel(s)
+    err_code = nrf_drv_saadc_channel_init(0, &channel_x_config);
     APP_ERROR_CHECK(err_code);
+    err_code = nrf_drv_saadc_channel_init(1, &channel_y_config);
+    APP_ERROR_CHECK(err_code);
+    err_code = nrf_drv_saadc_channel_init(2, &channel_z_config);
+    APP_ERROR_CHECK(err_code);
+
 
     err_code = nrf_drv_saadc_buffer_convert(m_buffer_pool[0],SAMPLES_IN_BUFFER);
     APP_ERROR_CHECK(err_code);
@@ -740,77 +758,11 @@ void saadc_init(void){
 /*                                                                     */
 /////////////////////////////////////////////////////////////////////////
 
-/////////////////////////////////////////////////////////////////////////
-/*              EDDYSTONE SJÆSJ                                        */
-/////////////////////////////////////////////////////////////////////////
-/**@brief Function for initializing the advertising functionality.
- *
- * @details Encodes the required advertising data and passes it to the stack.
- *          Also builds a structure to be passed to the stack when starting advertising.
- */
-static void eddy_advertising_init(void)
-{
-    uint32_t      err_code;
-    ble_advdata_t advdata;
-    uint8_t       flags = BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;
-    ble_uuid_t    adv_uuids[] = {{APP_EDDYSTONE_UUID, BLE_UUID_TYPE_BLE}};
-
-    uint8_array_t eddystone_data_array;                             // Array for Service Data structure.
-/** @snippet [Eddystone data array] */
-    eddystone_data_array.p_data = (uint8_t *) eddystone_url_data;   // Pointer to the data to advertise.
-    eddystone_data_array.size = sizeof(eddystone_url_data);         // Size of the data to advertise.
-/** @snippet [Eddystone data array] */
-
-    ble_advdata_service_data_t service_data;                        // Structure to hold Service Data.
-    service_data.service_uuid = APP_EDDYSTONE_UUID;                 // Eddystone UUID to allow discoverability on iOS devices.
-    service_data.data = eddystone_data_array;                       // Array for service advertisement data.
-
-    // Build and set advertising data.
-    memset(&advdata, 0, sizeof(advdata));
-
-    advdata.name_type               = BLE_ADVDATA_NO_NAME;
-    advdata.flags                   = flags;
-    advdata.uuids_complete.uuid_cnt = sizeof(adv_uuids) / sizeof(adv_uuids[0]);
-    advdata.uuids_complete.p_uuids  = adv_uuids;
-    advdata.p_service_data_array    = &service_data;                // Pointer to Service Data structure.
-    advdata.service_data_count      = 1;
-
-    err_code = ble_advdata_set(&advdata, NULL);
-    APP_ERROR_CHECK(err_code);
-
-    // Initialize advertising parameters (used when starting advertising).
-    memset(&m_adv_params, 0, sizeof(m_adv_params));
-
-    m_adv_params.type        = BLE_GAP_ADV_TYPE_ADV_NONCONN_IND;
-    m_adv_params.p_peer_addr = NULL;                                // Undirected advertisement.
-    m_adv_params.fp          = BLE_GAP_ADV_FP_ANY;
-    m_adv_params.interval    = NON_CONNECTABLE_ADV_INTERVAL;
-    m_adv_params.timeout     = APP_CFG_NON_CONN_ADV_TIMEOUT;
-}
 
 
-/**@brief Function for starting advertising.
- */
-static void eddy_advertising_start(void)
-{
-    uint32_t err_code;
-
-    err_code = sd_ble_gap_adv_start(&m_adv_params);
-    APP_ERROR_CHECK(err_code);
-
-    err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
-    APP_ERROR_CHECK(err_code);
-}
-//////////////////////////////////////////////////////////////////////
-//                                                                  //
-//////////////////////////////////////////////////////////////////////
-
-//Declare the available colors
-uint8_t ledMatriseA[] = {whiteA, redA, greenA, redA+greenA, blueA+greenA, blueA+redA, blueA};
-uint8_t ledMatriseB[] = {whiteB, redB, greenB, redB+greenB, blueB+greenB, blueB+redB, blueB}; 
 
 //////////////////////////////////////////////////////////////////////
-//                      Joakim Tips test                            //
+//                      Timeslot - Eddystone-URL                    //
 //////////////////////////////////////////////////////////////////////
 static void beacon_advertiser_error_handler(uint32_t nrf_error)
 {
@@ -838,12 +790,6 @@ static uint32_t timeslot_init(void)
  
     return NRF_SUCCESS;
 }
- 
-
-
- 
-//Sørg for at softdevice_sys_evt_handler_set(sys_evt_dispatch) blir kallt i ble_stack_init()
-
 //////////////////////////////////////////////////////////////////////
 //                                                                  //
 //////////////////////////////////////////////////////////////////////
@@ -852,92 +798,98 @@ static uint32_t timeslot_init(void)
  */
 int main(void)
 {
+    
+       
     uint32_t err_code;
-    
-    
+    nrf_gpio_cfg_output(RUMBLEPIN);
+    nrf_gpio_pin_clear(RUMBLEPIN);
+    SEGGER_RTT_printf(0, "Rumble set\r\n");
     // Initialize.
     APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false);
     
-    // Eddystone del.. //
-    if(EDDYSTONE){
-        err_code = bsp_init(BSP_INIT_LED, APP_TIMER_TICKS(100, APP_TIMER_PRESCALER), NULL);
-        APP_ERROR_CHECK(err_code);
-        ble_stack_init();
-        eddy_advertising_init();
-        //LEDS_ON(LEDS_MASK);
-        // Start execution.
-        eddy_advertising_start();
-    }
-    else if(!EDDYSTONE){  
-        bool erase_bonds;
-       
-        uart_init();   
-        buttons_leds_init(&erase_bonds);
-        ble_stack_init();
-        gap_params_init();
-        services_init();
-        advertising_init();
-        conn_params_init();
-        //SAADC - Analogue accellerometer
-        //saadc_sampling_event_init();
-        //saadc_init();
-        //saadc_sampling_event_enable();
-              
-        //uint8_t  start_string[] = START_STRING;
-        //SEGGER_RTT_printf("%s",start_string);
-    
-        err_code = ble_advertising_start(BLE_ADV_MODE_FAST);
-        APP_ERROR_CHECK(err_code);
-        timeslot_init();
-        shiftRegInit();
-        shiftRegWrite(whiteA + whiteB,whiteA + whiteB,whiteA + whiteB);
-    }
+    SEGGER_RTT_printf(0, "No Eddy\r\n");
+    bool erase_bonds;
+     
+    buttons_leds_init(&erase_bonds);
+    ble_stack_init();
+    gap_params_init();
+    services_init();
+    advertising_init();
+    conn_params_init();
+    //SAADC - Analogue accellerometer
+    saadc_sampling_event_init();
+    saadc_init();
+    saadc_sampling_event_enable();    
+    //uint8_t  start_string[] = START_STRING;
+    //SEGGER_RTT_printf("%s",start_string);
+
+    err_code = ble_advertising_start(BLE_ADV_MODE_FAST);
+    APP_ERROR_CHECK(err_code);
+    timeslot_init();
+    shiftRegInit();
+    shiftRegWrite(whiteA + whiteB,whiteA + whiteB,whiteA + whiteB);
+
     // Enter main loop.
+    SEGGER_RTT_printf(0, "We're entering tha looop! AMMAGAD!\r\n");
     for (;;)
     {
-        if(!EDDYSTONE){
-            //Checking if the cube has been shaken, then sends solution to the webpage. 
-            if(cube_shaking) {
-                solution[6] = 2;
-                ble_nus_string_send(&m_nus, solution, sizeof(solution));
-            }
-            //
-            /*if(!(nrf_gpio_pin_read(14)) && knappSjekk) {
-                solution[6] = 1;  //If button is clicked, kube asks the webpage for a new task. 
-                ble_nus_string_send(&m_nus, solution, sizeof(solution));
-                knappSjekk = false;
-            }
-            if (nrf_gpio_pin_read(14)) {//Funksjon for å hindre at for mye data sendes når knappen trykkes inn.
-                solution[6] = 0;
-                knappSjekk = true;
-            }*/
-            if(nrf_gpio_pin_read(btn1)) {
-                btn1_counter = btnCounter(btn1, btn1_counter);
-                solution[0] = btn1_counter;
-            }
-            else if(nrf_gpio_pin_read(btn2)) {
-                btn2_counter = btnCounter(btn2, btn2_counter);
-                solution[1] = btn2_counter;		
-            }
-            else if(nrf_gpio_pin_read(btn3)) {
-                btn3_counter = btnCounter(btn3, btn3_counter);
-                solution[2] = btn3_counter;			
-            }
-            else if(nrf_gpio_pin_read(btn4)) {
-                btn4_counter = btnCounter(btn4, btn4_counter);
-                solution[3] = btn4_counter;			
-            }
-            else if(nrf_gpio_pin_read(btn5)) {
-                btn5_counter = btnCounter(btn5, btn5_counter);
-                solution[4] = btn5_counter;			
-            }
-            else if(nrf_gpio_pin_read(btn6)) {
-                btn6_counter = btnCounter(btn6, btn6_counter);
-                solution[5] = btn6_counter;
-            }
-            shiftRegWrite(ledMatriseA[btn1_counter]+ledMatriseB[btn2_counter], ledMatriseA[btn3_counter]+ledMatriseB[btn4_counter], ledMatriseA[btn5_counter]+ledMatriseB[btn6_counter]);
-        }  
-		
+        //Checking if the cube has been shaken, then sends solution to the webpage. 
+        if(cube_shaking) {
+            SEGGER_RTT_printf(0, "Cube has bin shoooocked !\r\n");
+            solution[6] = 2;
+            ble_nus_string_send(&m_nus, solution, sizeof(solution));
+        }
+        if(nrf_gpio_pin_read(btn1) && knappSjekk1) {
+            btn1_counter = btnCounter(btn1, btn1_counter);
+            solution[0] = btn1_counter;
+            knappSjekk1 = false;
+        }
+        else if(!(nrf_gpio_pin_read(btn1))) {
+            knappSjekk1 = true;
+        }
+        if(nrf_gpio_pin_read(btn2) && knappSjekk2) {
+            btn2_counter = btnCounter(btn2, btn2_counter);
+            solution[1] = btn2_counter;
+            knappSjekk2 = false;
+        }
+        else if(!(nrf_gpio_pin_read(btn2))) {
+            knappSjekk2 = true;
+        }
+        if(nrf_gpio_pin_read(btn3) && knappSjekk3) {
+            btn3_counter = btnCounter(btn3, btn3_counter);
+            solution[2] = btn3_counter;
+            knappSjekk3 = false;
+        }
+        else if(!(nrf_gpio_pin_read(btn3))) {
+            knappSjekk3 = true;
+        }
+        if(nrf_gpio_pin_read(btn4) && knappSjekk4) {
+            btn4_counter = btnCounter(btn4, btn4_counter);
+            solution[3] = btn4_counter;
+            knappSjekk4 = false;
+        }
+        else if(!(nrf_gpio_pin_read(btn4))) {
+            knappSjekk4 = true;
+        }
+        if(nrf_gpio_pin_read(btn5) && knappSjekk5) {
+            btn5_counter = btnCounter(btn5, btn5_counter);
+            solution[4] = btn5_counter;
+            knappSjekk5 = false;
+        }
+        else if(!(nrf_gpio_pin_read(btn5))) {
+            knappSjekk5 = true;
+        }
+        if(nrf_gpio_pin_read(btn6) && knappSjekk6) {
+            btn6_counter = btnCounter(btn6, btn6_counter);
+            solution[5] = btn6_counter;
+            knappSjekk6 = false;
+        }
+        else if(!(nrf_gpio_pin_read(btn6))) {
+            knappSjekk6 = true;
+        }
+        shiftRegWrite(ledMatriseA[btn1_counter]+ledMatriseB[btn2_counter], ledMatriseA[btn3_counter]+ledMatriseB[btn4_counter], ledMatriseA[btn5_counter]+ledMatriseB[btn6_counter]);
+
+    
 
         //power_manage();
     }

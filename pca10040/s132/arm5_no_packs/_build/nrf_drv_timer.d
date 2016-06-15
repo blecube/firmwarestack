@@ -34,3 +34,5 @@
 .\_build\nrf_drv_timer.o: ..\..\..\components\softdevice\s132\headers\nrf_svc.h
 .\_build\nrf_drv_timer.o: ..\..\..\components\softdevice\s132\headers\nrf_error_soc.h
 .\_build\nrf_drv_timer.o: ..\..\..\components\softdevice\s132\headers\nrf_nvic.h
+.\_build\nrf_drv_timer.o: ..\..\..\components\segger_rtt\SEGGER_RTT.h
+.\_build\nrf_drv_timer.o: ..\..\..\components\segger_rtt\SEGGER_RTT_Conf.h

@@ -93,11 +93,13 @@ typedef void (*sys_evt_handler_t) (uint32_t evt_id);
     do                                                                                             \
     {                                                                                              \
         static uint32_t BLE_EVT_BUFFER[CEIL_DIV(BLE_STACK_EVT_MSG_BUF_SIZE, sizeof(uint32_t))];    \
+        SEGGER_RTT_printf(0,"    Satt opp BLE_EVT_BUFFER, skal lager ERR_Code\r\n");                   \
         uint32_t ERR_CODE;                                                                         \
         ERR_CODE = softdevice_handler_init((CLOCK_SOURCE),                                         \
                                            BLE_EVT_BUFFER,                                         \
                                            sizeof(BLE_EVT_BUFFER),                                 \
                                            EVT_HANDLER);                                           \
+        SEGGER_RTT_printf(0,"    Softdevice_handler_init Error Code:\r\n",ERR_CODE);                   \
         APP_ERROR_CHECK(ERR_CODE);                                                                 \
     } while (0)
 

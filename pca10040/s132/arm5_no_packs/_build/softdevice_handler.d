@@ -48,3 +48,5 @@
 .\_build\softdevice_handler.o: ..\..\..\components\libraries\util\sdk_os.h
 .\_build\softdevice_handler.o: ..\..\..\config\ble_app_uart_s132_pca10040\nrf_drv_config.h
 .\_build\softdevice_handler.o: ..\..\..\components\drivers_nrf\config\nrf_drv_config_validation.h
+.\_build\softdevice_handler.o: ..\..\..\components\segger_rtt\SEGGER_RTT.h
+.\_build\softdevice_handler.o: ..\..\..\components\segger_rtt\SEGGER_RTT_Conf.h

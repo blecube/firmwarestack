@@ -13,6 +13,7 @@
 #include "nrf_drv_timer.h"
 #include "nrf_drv_common.h"
 #include "app_util_platform.h"
+#include "SEGGER_RTT.h"
 
 #if (TIMER_COUNT == 0)
     #error "No TIMER instances enabled in the driver configuration file."
@@ -48,48 +49,51 @@ static const nrf_drv_timer_config_t m_default_config[TIMER_COUNT] = {
 };
 
 
-ret_code_t nrf_drv_timer_init(nrf_drv_timer_t const * const p_instance,
+ret_code_t nrf_drv_timer_init
+(nrf_drv_timer_t const * const p_instance,
                               nrf_drv_timer_config_t const * p_config,
                               nrf_timer_event_handler_t timer_event_handler)
 {
     timer_control_block_t * p_cb = &m_cb[p_instance->instance_id];
-
+    SEGGER_RTT_printf(0, "    2ASSERTS..\r\n");
 #ifdef SOFTDEVICE_PRESENT
     ASSERT(p_instance->p_reg != NRF_TIMER0);
 #endif
     ASSERT(NRF_TIMER_IS_BIT_WIDTH_VALID(p_instance->p_reg, p_config->bit_width));
-
+    SEGGER_RTT_printf(0, "    ASSERTS GIKK OK\r\n");
     if (p_cb->state != NRF_DRV_STATE_UNINITIALIZED)
     {
         return NRF_ERROR_INVALID_STATE;
     }
-
     if (timer_event_handler == NULL)
     {
         return NRF_ERROR_INVALID_PARAM;
     }
-
     if (p_config == NULL)
     {
         p_config = &m_default_config[p_instance->instance_id];
     }
-
     p_cb->handler = timer_event_handler;
     p_cb->context = p_config->p_context;
 
     uint8_t i;
     for (i = 0; i < p_instance->cc_channel_count; ++i)
     {
+        SEGGER_RTT_printf(0, "    For løkke iterasjon nr.: %d\r\n", i);
         nrf_timer_event_clear(p_instance->p_reg,
             nrf_timer_compare_event_get(i));
     }
-
+    SEGGER_RTT_printf(0, "    nrf_drv_common_irq_enable..\r\n");
     nrf_drv_common_irq_enable(nrf_drv_get_IRQn(p_instance->p_reg),
         p_config->interrupt_priority);
+    SEGGER_RTT_printf(0, "    nrf_drv_common_irq_enabled..\r\n");
 
     nrf_timer_mode_set(p_instance->p_reg, p_config->mode);
+    SEGGER_RTT_printf(0, "    nrf_timer_mode_set..\r\n");
     nrf_timer_bit_width_set(p_instance->p_reg, p_config->bit_width);
+    SEGGER_RTT_printf(0, "    nrf_timer_bit_width_set..\r\n");
     nrf_timer_frequency_set(p_instance->p_reg, p_config->frequency);
+    SEGGER_RTT_printf(0, "    nrf_timer_frequency_set..\r\n");
 
     p_cb->state = NRF_DRV_STATE_INITIALIZED;
 

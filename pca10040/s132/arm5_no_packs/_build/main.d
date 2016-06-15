@@ -38,7 +38,6 @@
 .\_build\main.o: ..\..\..\components\libraries\util\app_error_weak.h
 .\_build\main.o: ..\..\..\components\drivers_nrf\hal\nrf_gpio.h
 .\_build\main.o: ..\..\..\components\libraries\timer\app_timer.h
-.\_build\main.o: ..\..\..\components\libraries\uart\app_uart.h
 .\_build\main.o: ..\..\..\components\libraries\util\app_util_platform.h
 .\_build\main.o: ..\..\..\components\softdevice\s132\headers\nrf_soc.h
 .\_build\main.o: ..\..\..\components\softdevice\s132\headers\nrf_error_soc.h
@@ -73,3 +72,5 @@
 .\_build\main.o: ..\..\..\components\softdevice\common\softdevice_handler\ant_stack_handler_types.h
 .\_build\main.o: ..\..\..\components\softdevice\common\softdevice_handler\app_ram_base.h
 .\_build\main.o: ..\..\..\components\libraries\shiftreg\shiftReg.h
+.\_build\main.o: ..\..\..\components\segger_rtt\SEGGER_RTT.h
+.\_build\main.o: ..\..\..\components\segger_rtt\SEGGER_RTT_Conf.h

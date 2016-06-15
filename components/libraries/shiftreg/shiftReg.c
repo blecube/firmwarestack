@@ -72,7 +72,7 @@ void shiftRegWrite(uint8_t reg1, uint8_t reg2, uint8_t reg3) {
 
 //Function for tracking button presses
 uint8_t btnCounter(uint8_t btn, uint8_t btncounter) {
-	while(nrf_gpio_pin_read(btn));
+	//while(nrf_gpio_pin_read(btn));
 	btncounter++;
 	if(btncounter > 6){
 		btncounter = 1;
